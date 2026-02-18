@@ -61,13 +61,13 @@ sudo kubectl -n traefik port-forward svc/traefik 80 --kubeconfig $HOME/.kube/con
 
 8. Устанавливаем GatewayClass с указанием траефика, это делается на весь кластер
 
-kubectl apply -f ./01-gatewayclass.yaml
+kubectl apply -f ./01-gateway-class.yaml
 
 
 kubectl get gatewayclass
 kubectl describe gatewayclass
 
-Здесь должно быть Accepted Programmed True
+Здесь должно быть Accepted Programmed/Handled True
 
 
 9. Также устанавливаем Gateway в нужном спейсе, я делал в дефолтном
