@@ -1,0 +1,136 @@
+1. Создадим новый профиль в миникубе
+
+minikube profile list
+minikube start --profile gateway-traefik
+minikube profile gateway-traefik
+minikube profile list
+kubectl get nodes
+
+
+2. Спулим нужные образы и загрузим их в кластер миникуба
+docker pull aimvector/python:1.0.0
+docker pull aimvector/golang:1.0.0
+docker pull nginx:stable-alpine
+docker pull docker.io/traefik:v3.6.0
+
+minikube image load aimvector/python:1.0.0
+minikube image load aimvector/golang:1.0.0
+minikube image load nginx:stable-alpine
+minikube image load docker.io/traefik:v3.6.0
+
+3.  Задеплоить пару тестовых приложений для проверки работы
+
+kubectl apply -f python-deployment.yaml 
+kubectl apply -f go-deployment.yaml 
+kubectl apply -f web-app.yaml 
+kubectl get pods
+kubectl get all
+
+
+
+4. В /etc/hosts занести необходимые имена
+
+127.0.0.1 example-app.com
+127.0.0.1 example-app-go.com
+127.0.0.1 example-app-python.com
+
+5. Установить CRD для Gateway API:
+
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/experimental-install.yaml
+
+
+6. Устанавливаем чарт с traefik
+
+CHART_VERSION="37.3.0" # traefik version v3.6.0
+helm repo add traefik https://helm.traefik.io/traefik
+helm repo update
+helm search repo traefik --versions
+
+
+helm install traefik traefik/traefik \
+  --version $CHART_VERSION \
+  --values ./values.yaml \
+  --namespace traefik \
+  --create-namespace
+
+
+7. Окроем порт на траефик
+
+sudo kubectl -n traefik port-forward svc/traefik 80 --kubeconfig $HOME/.kube/config
+
+
+8. Устанавливаем GatewayClass с указанием траефика, это делается на весь кластер
+
+kubectl apply -f ./01-gatewayclass.yaml
+
+
+kubectl get gatewayclass
+kubectl describe gatewayclass
+
+Здесь должно быть Accepted Programmed True
+
+
+9. Также устанавливаем Gateway в нужном спейсе, я делал в дефолтном
+
+kubectl apply -f ./02-gateway.yaml
+
+
+10. И применяем пути(httproute), здесь для примера сделаем с path-rewrite
+
+kubectl apply -f ./05-httproute-by-path-rewrite.yaml
+
+Потом чтобы проверить переходим в своем браузере на:
+
+http://example-app.com/api/python
+
+Или на
+
+http://example-app.com/api/go
+
+
+
+
+
+Для TLS
+
+curl -L https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64 -o mkcert
+chmod +x mkcert
+sudo mv mkcert /usr/local/bin/
+
+export CAROOT=${PWD}/kubernetes/gateway-api/tls
+
+mkcert -key-file kubernetes/gateway-api/tls/key.pem -cert-file kubernetes/gateway-api/tls/cert.pem example-app.com
+
+mkcert -install
+
+kubectl create secret tls secret-tls -n default --cert kubernetes/gateway-api/tls/cert.pem --key kubernetes/gateway-api/tls/key.pem
+
+kubectl apply -f ./07-httproute-tls.yaml
+sudo kubectl -n traefik port-forward svc/traefik 443 --kubeconfig $HOME/.kube/config
+
+И вот так тогда достукиваться
+https://example-app.com/api/go
+
+
+
+Утилита для переноса манифестов
+yq e '.metadata.annotations["haproxy.org/ssl-redirect"] = .metadata.annotations["nginx.ingress.kubernetes.io/force-ssl-redirect"]' ingress.yaml
+yq e 'del(.metadata.annotations["nginx.ingress.kubernetes.io/force-ssl-redirect"])' ingress.yaml
+yq e '.spec.ingressClassName = "haproxy"' ingress.yaml
+
+
+Для ingress2gateway
+
+Установить(это на Linux):
+git clone https://github.com/kubernetes-sigs/ingress2gateway.git && cd ingress2gateway
+make build
+sudo mv ingress2gateway /usr/local/bin/kubectl-ingress2gateway
+
+
+Тестировать вот этой командой:
+
+kubectl ingress2gateway print --providers nginx --input-file ./test-ingress-nginx.yaml
+
+Если в файл передавать, то:
+
+kubectl ingress2gateway print --providers nginx --input-file ./test-ingress-nginx.yaml > outputfile.yaml
